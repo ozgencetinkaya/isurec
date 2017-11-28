@@ -1,13 +1,20 @@
 
-
-exports.index = function (){
+module.exports = {
+    index : function (){
         console.log('index');
         this.view();
-    };
-
-exports.show = function (){
+    },
+    show : function (){
         console.log('show');
-        this.view();
-    };
+        this.json();
+    },
+    view : function (){
+        console.log('view');
+        this.json();
+    },
+    test : function (){
+        console.log('test');
+        this.json();
+    }
 
-
+};

@@ -5,6 +5,8 @@ const Os = require('os');
 const Fs = require('fs');
 const Path = require('path');
 const http = require('http');
+const fswatcher = require('./fswatcher/fswatcher');
+const constants = require('./const');
 
 
 var framework = new Framework();
@@ -13,6 +15,7 @@ if (!global.utils)
     global.utils = require('./utils');
 
 var util = global.Utils = global.utils;
+var dirwatcher = null;
 
 function Framework() {
 
@@ -24,6 +27,7 @@ function Framework() {
     this.controllers = {};
     this.constants = require('./const');
 
+
     this.config = {
 
         debug: false,
@@ -33,8 +37,10 @@ function Framework() {
         author: 'ozgen',
         machine_secret: Os.hostname() + '-' + Os.platform() + '-' + Os.arch(),
 
-        'controllers_directory': './app/controllers/'
-    }
+        'controllers_directory': constants.CONTROLLERS_PATH
+    };
+
+    this.controllers_path = Path.join(__dirname, '..' , this.config['controllers_directory']);
 
 }
 
@@ -45,28 +51,68 @@ fw.init = function(){
 fw.initControllers = function(){
     Fs.readdir( Path.join(__dirname, '..' , fw.config['controllers_directory']), function( err, files ){
         if( err ) throw err;
+
+        dirwatcher = fswatcher.createMonitor(fw.controllers_path, {},fw.controllerListener);
+
         files.forEach( function( file ){
-            var controllers_path = Path.join(__dirname, '..' , fw.config['controllers_directory']);
-            var file_path = controllers_path + file;
-            console.log("a");
-            Fs.watchFile(file_path,fw.controllerListener);
-            console.log(file_path);
-            if( /\.js$/.test( file )){
-                var controller = require( file_path );
-                Object.keys( controller ).forEach( function ( action ){
-                    var name = file.replace( '.js','' );
-                    var emptyController = new Controller(action, controller[ action ]);
-                    action === '' ? fw.controllers[ '/' + name ] = emptyController : fw.controllers[ '/' + name + '/' + action ] = emptyController;
-                });
-            }
+                var file_path = fw.controllers_path + file;
+                fw.registerController(file_path);
         });
     });
 };
 
-fw.controllerListener = function(curr, prev){
-    console.log('contoller file is changed ');
-    console.log(curr);
-    console.log(prev);
+fw.registerController = function(file) {
+    console.log(file);
+    if( /\.js$/.test( file )){
+        delete require.cache[require.resolve(file)];
+        var controller = require( file );
+        console.log(controller);
+        Object.keys( controller ).forEach( function ( action ){
+            var name = Path.parse(file)["name"].replace( '.js','' );
+            var emptyController = new Controller(action, controller[ action ]);
+            if (name === constants.DEFAULT_CONTROLLER) {
+                action === '' ? fw.controllers['/' ] = emptyController : fw.controllers[ '/' + action] = emptyController;
+            } else {
+                action === '' ? fw.controllers['/' + name] = emptyController : fw.controllers['/' + name + '/' + action] = emptyController;
+            }
+        });
+    }
+};
+
+fw.unRegisterController = function(file) {
+    if( /\.js$/.test( file )){
+        var controller = require( file );
+        Object.keys( controller ).forEach( function ( action ){
+
+            var name = Path.parse(file)["name"];
+            var key = '/' + name + '/' + action;
+            console.log(key);
+            delete fw.controllers[key];
+        });
+    }
+    delete require.cache[require.resolve(file)];
+};
+
+
+fw.controllerListener = function(monitor){
+    monitor.on("created", function (f, stat) {
+        console.log("new controller definition created");
+        //console.log(f);
+        //var file = f.split("\\").pop();
+        fw.registerController(f);
+    });
+    monitor.on("changed", function (f, curr, prev) {
+        console.log("controller definition changed");
+        //console.log(f);
+        //var file = f.split("\\").pop().replace( '.js','' );
+        fw.registerController(f);
+    });
+    monitor.on("removed", function (f, stat) {
+        console.log("controller definition removed");
+        //console.log(f);
+        fw.unRegisterController(f);
+    })
+    //monitor.stop(); // Stop watching
 };
 
 fw.serve = function(host, port){
@@ -84,16 +130,20 @@ fw.serve = function(host, port){
 
 fw.requesthandler = function(req, res) {
 
+
+
     var uri = utils.parseURI(req);
 
     var handler = uri.pathname;
 
-    handler = (handler === '/' || handler === '/default') ? '/default/index' : handler;
+    handler = (handler === '/' || handler === '/'+constants.DEFAULT_CONTROLLER) ? '/index' : handler;
 
     if(handler === '/favicon.ico') {
 
         res.end();
     } else {
+        console.log(Object.keys(fw.controllers));
+        console.log(handler);
         if( fw.controllers[ handler ]){
             try{
                 fw.controllers[ handler ].requesthandler( req, res );
@@ -127,6 +177,11 @@ Controller.prototype.requesthandler = function (req, res){
 
 Controller.prototype.view = function() {
     this.res.write(this.name);
+};
+
+Controller.prototype.json = function() {
+    var jsonReturn = {'test':this.name};
+    this.res.write(JSON.stringify(jsonReturn));
 };
 
 
