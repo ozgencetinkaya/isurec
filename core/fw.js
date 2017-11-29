@@ -27,6 +27,7 @@ function Framework() {
     this.controllers = {};
     this.constants = require('./const');
 
+    this.server = http.createServer( );
 
     this.config = {
 
@@ -41,6 +42,8 @@ function Framework() {
     };
 
     this.controllers_path = Path.join(__dirname, '..' , this.config['controllers_directory']);
+    var logger = require('../core/logmanager');
+    this.logger = new logger('framework_logger',constants.DEFAULT_LOG_LEVEL,null,constants.LOG_ONLY_CONSOLE);
 
 }
 
@@ -62,11 +65,11 @@ fw.initControllers = function(){
 };
 
 fw.registerController = function(file) {
-    console.log(file);
+
     if( /\.js$/.test( file )){
         delete require.cache[require.resolve(file)];
         var controller = require( file );
-        console.log(controller);
+        fw.logger.debug(controller);
         Object.keys( controller ).forEach( function ( action ){
             var name = Path.parse(file)["name"].replace( '.js','' );
             var emptyController = new Controller(action, controller[ action ]);
@@ -123,15 +126,13 @@ fw.serve = function(host, port){
     var HOST = "localhost";
     if(host) HOST = host;
 
-    var server = http.createServer( ).listen( PORT, HOST );
+    fw.server.listen( PORT, HOST );
 
-    server.on('request', fw.requesthandler );
+    fw.server.on('request', fw.requesthandler );
 };
 
+
 fw.requesthandler = function(req, res) {
-
-
-
     var uri = utils.parseURI(req);
 
     var handler = uri.pathname;
@@ -139,11 +140,10 @@ fw.requesthandler = function(req, res) {
     handler = (handler === '/' || handler === '/'+constants.DEFAULT_CONTROLLER) ? '/index' : handler;
 
     if(handler === '/favicon.ico') {
-
         res.end();
     } else {
-        console.log(Object.keys(fw.controllers));
-        console.log(handler);
+        //console.log(Object.keys(fw.controllers));
+        //console.log(handler);
         if( fw.controllers[ handler ]){
             try{
                 fw.controllers[ handler ].requesthandler( req, res );
@@ -151,10 +151,17 @@ fw.requesthandler = function(req, res) {
                 res.error( 500, err );
             }
         }else{
-            console.log("else");
+            fw.view404(req,res,handler);
         }
     }
 };
+
+fw.view404 = function(req,res,handler){
+    console.log("No request handler found for " + handler);
+    res.writeHead(404, {"Content-Type": "text/plain"});
+    res.write("404 Not found");
+    res.end();
+}
 
 function Controller(name, fun) {
     this.name = name;
